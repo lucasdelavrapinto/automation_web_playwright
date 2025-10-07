@@ -19,3 +19,9 @@ Instale o Playwright:
 Para executar o script automaticamente, você pode usar o CRON, como exemplo:
 
 `59 23 * * * python3 index.py` que irá executar o script todos dias as 23:59.
+
+---
+
+# Tarefas
+
+[] no final gerar um zip da pasta downloads
