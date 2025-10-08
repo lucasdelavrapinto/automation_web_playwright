@@ -4,13 +4,12 @@ from time import sleep
 from playwright.async_api import async_playwright
 import os
 import sys
+import sqlite3
 
 CREDENTIALS_FILE = "credentials.json"
 LOGIN_URL = "https://safracontrol.souagrosolucoes.com.br/invoices/list"
 
-lista = [
-    
-]
+lista_de_chaves = []
 
 # Carregar credenciais salvas ou pedir pro usuário
 def load_credentials():
@@ -50,10 +49,61 @@ def pastaNome(nota, cliente):
         print(f"A pasta '{nome_pasta}' já existe.")
     return nome_pasta
 
+def initdb():
+    conn = sqlite3.connect('mydatabase.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notas (
+            id INTEGER PRIMARY KEY,
+            chave_acesso VARCHAR(255) NOT NULL,
+            success BOOLEAN
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def insert_nota(chave_acesso, success):
+    conn = sqlite3.connect('mydatabase.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM notas WHERE chave_acesso = ?', (chave_acesso,))
+    exists = cursor.fetchone()
+    if not exists:
+        cursor.execute('''
+            INSERT INTO notas (chave_acesso, success)
+            VALUES (?, ?)
+        ''', (chave_acesso, success))
+        conn.commit()
+    conn.close()
+
+def lista_notas():
+    conn = sqlite3.connect('mydatabase.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT chave_acesso FROM notas WHERE success = 0')
+    rows = cursor.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+def marcar_nota_sucesso(chave_acesso):
+    conn = sqlite3.connect('mydatabase.db')
+    cursor = conn.cursor()
+    cursor.execute('UPDATE notas SET success = 1 WHERE chave_acesso = ?', (chave_acesso,))
+    conn.commit()
+    conn.close()
 
 async def run():
+    initdb()    
+
     creds = load_credentials()
     os.makedirs("chrome_profile", exist_ok=True)  # pasta onde o perfil será guardado
+
+    if lista_de_chaves:
+        for item in lista_de_chaves:
+            print(f"Chave de acesso: {item}")
+            insert_nota(str(item), False)
+
+    # Iniciar Playwright
+
+    lista = lista_notas()
 
     async with async_playwright() as p:
         browser_context = await p.chromium.launch_persistent_context(
@@ -70,19 +120,25 @@ async def run():
 
         for item in lista:
 
+            print(f"Iniciando processo para a chave: {item}")
+
             await page.goto(LOGIN_URL)
 
             await page.wait_for_selector("input#nfeKey.ant-input.css-kiyw7i")
+
+            sleep(2)
+
             await page.fill("input#nfeKey.ant-input.css-kiyw7i", item)
+
+            sleep(1)
 
             await page.keyboard.press("Enter")
 
             sleep(10)
 
-            # Aguarda a tabela renderizar
-            await page.wait_for_selector("div.ant-table-content")
+            await page.wait_for_selector("tbody.ant-table-tbody")
 
-            last_row = page.locator("tbody.ant-table-tbody").last
+            last_row = page.locator("tr.ant-table-row.ant-table-row-level-0").first
 
             options_cell = last_row.locator(
                 "td.ant-table-cell.ant-table-cell-fix-right.ant-table-cell-fix-right-first"
@@ -92,7 +148,7 @@ async def run():
             await options_cell.hover()
 
             await options_cell.get_by_role("img", name="eye").click()
-            sleep(7)
+            sleep(10)
 
             await page.wait_for_selector("div.ant-descriptions-view")
             itens_da_nota = await page.query_selector_all("td.ant-descriptions-item span.ant-descriptions-item-content")
@@ -106,9 +162,14 @@ async def run():
 
             numero_nota = valores[0]
             nome_cliente = valores[2]
-
+            chave_acesso_nota = valores[12]
+            print("Chave de acesso da nota no portal:", chave_acesso_nota)
             print(numero_nota)
             print(nome_cliente)
+
+            if chave_acesso_nota != item:
+                print(f"⚠ A chave de acesso da nota ({chave_acesso_nota}) não corresponde à chave pesquisada ({item}). Pulando...")
+                sys.exit
 
             nome_pasta = pastaNome(numero_nota, nome_cliente)
 
@@ -137,11 +198,18 @@ async def run():
 
                     await download.save_as(caminho)
                     print(f"✔ Arquivo salvo.")
+
+                    marcar_nota_sucesso(item)
+                    print(f"✔ Nota atualizada no banco de dados.")
+
                 else:
                     print(f"⚠ Nenhum botão de download encontrado na linha {index}")
             
             print(f"Finalizando esta chave")
             print(f"Indo para a próxima")
+
+        print(f"Fim")
+        #Adicionar uma função para criar um zip da pasta downloads.
 
         await browser_context.close()
 
