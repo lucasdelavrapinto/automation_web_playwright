@@ -5,6 +5,7 @@ from playwright.async_api import async_playwright
 import os
 import sys
 import sqlite3
+import zipfile
 
 CREDENTIALS_FILE = "credentials.json"
 LOGIN_URL = "https://safracontrol.souagrosolucoes.com.br/invoices/list"
@@ -89,6 +90,15 @@ def marcar_nota_sucesso(chave_acesso):
     cursor.execute('UPDATE notas SET success = 1 WHERE chave_acesso = ?', (chave_acesso,))
     conn.commit()
     conn.close()
+
+def compactar_pasta(pasta_origem, nome_zip):
+    with zipfile.ZipFile(nome_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for raiz, _, arquivos in os.walk(pasta_origem):
+            for arquivo in arquivos:
+                caminho_completo = os.path.join(raiz, arquivo)
+                caminho_relativo = os.path.relpath(caminho_completo, pasta_origem)
+                zipf.write(caminho_completo, caminho_relativo)
+    print(f'Pasta "{pasta_origem}" compactada com sucesso em "{nome_zip}"')
 
 async def run():
     initdb()    
@@ -209,7 +219,8 @@ async def run():
             print(f"Indo para a próxima")
 
         print(f"Fim")
-        #Adicionar uma função para criar um zip da pasta downloads.
+
+        compactar_pasta("downloads", "notas_compactadas.zip")
 
         await browser_context.close()
 
